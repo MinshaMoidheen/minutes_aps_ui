@@ -1,5 +1,6 @@
 'use client'
 
+import { useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { Header } from '@/components/layout/header'
 import { ProfileDropdown } from '@/components/profile-dropdown'
@@ -8,17 +9,22 @@ import { ThemeSwitch } from '@/components/theme-switch'
 import { Main } from '@/components/ui/main'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { RoleProtectedRoute } from '@/components/role-protected-route'
-import { useGetScheduleByIdQuery, type Schedule } from '@/store/api/scheduleApi'
+import { useGetScheduleByIdQuery, useUpdateScheduleMutation, type Schedule } from '@/store/api/scheduleApi'
 import { ScheduleDetailPanel } from '../components/schedule-detail-panel'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { Button } from '@/components/ui/button'
+import { toast } from '@/hooks/use-toast'
+import { PanelRightOpen } from 'lucide-react'
 
 export default function ScheduleDetailPage() {
   const params = useParams()
   const router = useRouter()
   const id = (params?.id as string) || ''
+  const [isPanelOpen, setIsPanelOpen] = useState(true)
 
   const { data, isLoading } = useGetScheduleByIdQuery(id, { skip: !id })
   const schedule = (data as any)?.schedule as Schedule | undefined
+  const [updateSchedule, { isLoading: isUpdating }] = useUpdateScheduleMutation()
 
   // Safely derive a string label for meeting type
   const meetingTypeLabel = (() => {
@@ -34,6 +40,33 @@ export default function ScheduleDetailPage() {
     return '—'
   })()
 
+  const handleMarkAsComplete = async (pointIndex: number) => {
+    if (!schedule?._id) return
+
+    const meetingPoints = [...((schedule as any).meetingPoints || [])]
+    meetingPoints[pointIndex] = {
+      ...meetingPoints[pointIndex],
+      status: 'complete'
+    }
+
+    try {
+      await updateSchedule({
+        scheduleId: schedule._id,
+        data: { meetingPoints }
+      }).unwrap()
+      toast({
+        title: 'Success',
+        description: 'Meeting point marked as complete.',
+      })
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error?.data?.message || 'Failed to update meeting point status.',
+        variant: 'destructive',
+      })
+    }
+  }
+
   return (
     <RoleProtectedRoute allowedRoles={['user', 'admin', 'superadmin']}>
       <Header fixed>
@@ -45,7 +78,19 @@ export default function ScheduleDetailPage() {
       </Header>
 
       <Main fixed>
-        <div className='px-4 w-full space-y-4'>
+        <div className='px-4 w-full space-y-4 relative'>
+          {/* Button to reopen panel when closed */}
+          {!isPanelOpen && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setIsPanelOpen(true)}
+              className="absolute top-0 right-0 flex items-center gap-2 z-10"
+            >
+              <PanelRightOpen className="h-4 w-4" />
+              {/* <span>Show Panel</span> */}
+            </Button>
+          )}
           {schedule && (
             <div className="flex flex-col lg:flex-row gap-6">
               {/* Left: Minimal details */}
@@ -73,9 +118,10 @@ export default function ScheduleDetailPage() {
                           <Table>
                             <TableHeader>
                               <TableRow>
-                                <TableHead className='w-[35%]'>Points Discussed</TableHead>
-                                <TableHead className='w-[35%]'>Plan of Action</TableHead>
-                                <TableHead className='w-[30%]'>Accountability</TableHead>
+                                <TableHead className='w-[30%]'>Points Discussed</TableHead>
+                                <TableHead className='w-[30%]'>Plan of Action</TableHead>
+                                <TableHead className='w-[25%]'>Accountability</TableHead>
+                                <TableHead className='w-[15%]'>Actions</TableHead>
                               </TableRow>
                             </TableHeader>
                             <TableBody>
@@ -86,6 +132,22 @@ export default function ScheduleDetailPage() {
                                     <TableCell className={`align-top whitespace-pre-wrap break-words text-sm ${isComplete ? 'bg-green-50' : ''}`}>{mp.pointsDiscussed || '—'}</TableCell>
                                     <TableCell className={`align-top whitespace-pre-wrap break-words text-sm ${isComplete ? 'bg-green-50' : ''}`}>{mp.planOfAction || '—'}</TableCell>
                                     <TableCell className={`align-top whitespace-pre-wrap break-words text-sm ${isComplete ? 'bg-green-50' : ''}`}>{mp.accountability || '—'}</TableCell>
+                                    <TableCell className={`align-top ${isComplete ? 'bg-green-50' : ''}`}>
+                                      {!isComplete ? (
+                                        <Button
+                                          type="button"
+                                          variant="outline"
+                                          size="sm"
+                                          onClick={() => handleMarkAsComplete(idx)}
+                                          disabled={isUpdating}
+                                          className="text-green-600 hover:text-green-700 border-green-300 hover:bg-green-50"
+                                        >
+                                          Mark as Complete
+                                        </Button>
+                                      ) : (
+                                        <span className="text-sm text-green-600 font-medium">Complete</span>
+                                      )}
+                                    </TableCell>
                                   </TableRow>
                                 )
                               })}
@@ -100,13 +162,15 @@ export default function ScheduleDetailPage() {
                 </Card>
               </div>
               {/* Right: detail panel with previous meetings */}
-              <div className='w-full lg:flex-1 lg:min-w-[360px] lg:max-w-[480px]'>
-                <ScheduleDetailPanel
-                  schedule={schedule}
-                  isOpen={true}
-                  onClose={() => router.back()}
-                />
-              </div>
+              {isPanelOpen && (
+                <div className='w-full lg:flex-1 lg:min-w-[360px] lg:max-w-[480px]'>
+                  <ScheduleDetailPanel
+                    schedule={schedule}
+                    isOpen={true}
+                    onClose={() => setIsPanelOpen(false)}
+                  />
+                </div>
+              )}
             </div>
           )}
         </div>

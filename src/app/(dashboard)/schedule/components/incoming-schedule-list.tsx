@@ -136,6 +136,13 @@ export function IncomingScheduleList({ onEdit, status = 'incoming' }: IncomingSc
     })
   }
 
+  const getPointsCount = (schedule: any) => {
+    const meetingPoints = (schedule as any).meetingPoints || []
+    const total = meetingPoints.length
+    const completed = meetingPoints.filter((point: any) => point.status === 'complete').length
+    return { completed, total }
+  }
+
   return (
     <div className="space-y-4">
       {/* Search Bar */}
@@ -162,20 +169,21 @@ export function IncomingScheduleList({ onEdit, status = 'incoming' }: IncomingSc
             <TableRow>
               <TableHead>Title</TableHead>
               <TableHead>Date & Time</TableHead>
-              {/* <TableHead></TableHead> */}
-              {/* <TableHead className="w-[120px]">Meeting Points</TableHead> */}
+              <TableHead className="w-[100px]">Points</TableHead>
               <TableHead className="w-[70px]">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {filteredSchedules.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={5} className="h-24 text-center">
+                <TableCell colSpan={4} className="h-24 text-center">
                   {searchTerm ? 'No upcoming meetings found matching your search.' : 'No upcoming meetings found.'}
                 </TableCell>
               </TableRow>
             ) : (
-              filteredSchedules.map((schedule) => (
+              filteredSchedules.map((schedule) => {
+                const { completed, total } = getPointsCount(schedule)
+                return (
                 <TableRow key={schedule._id}>
                   <TableCell className="font-medium">
                     <div className="space-y-1">
@@ -197,10 +205,11 @@ export function IncomingScheduleList({ onEdit, status = 'incoming' }: IncomingSc
                       </div>
                     </div>
                   </TableCell>
-                  {/* <TableCell>
-                    {getStatusBadge(schedule.status)}
-                  </TableCell> */}
-                  
+                  <TableCell>
+                    <div className="text-sm font-medium">
+                      {total > 0 ? `${completed}/${total}` : '0/0'}
+                    </div>
+                  </TableCell>
                   <TableCell>
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
@@ -235,7 +244,8 @@ export function IncomingScheduleList({ onEdit, status = 'incoming' }: IncomingSc
                     </DropdownMenu>
                   </TableCell>
                 </TableRow>
-              ))
+              )
+              })
             )}
           </TableBody>
         </Table>

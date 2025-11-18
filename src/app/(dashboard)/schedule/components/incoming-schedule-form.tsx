@@ -648,36 +648,6 @@ export function IncomingScheduleForm({ mode, schedule, onSuccess, onCancel, onVi
                             type="button"
                             variant="outline"
                             size="sm"
-                            onClick={async () => {
-                              const arr = [...(field.value || [])]
-                              const currentStatus = arr[index]?.status || 'pending'
-                              const nextStatus = currentStatus === 'pending' ? 'complete' : 'pending'
-                              arr[index] = { 
-                                ...arr[index], 
-                                status: nextStatus 
-                              }
-                              field.onChange(arr)
-                              // Persist immediately when editing existing schedule
-                              if (mode === 'edit' && schedule?._id) {
-                                try {
-                                  await updateSchedule({ scheduleId: schedule._id, data: { meetingPoints: arr } }).unwrap()
-                                } catch (err) {
-                                  // revert if failed
-                                  const rollback = [...(field.value || [])]
-                                  rollback[index] = { ...rollback[index], status: currentStatus }
-                                  field.onChange(rollback)
-                                }
-                              }
-                            }}
-                            disabled={isLoading || readOnly}
-                            className={isComplete ? "text-green-600 hover:text-green-700 border-green-300 w-full" : "w-full"}
-                          >
-                            {isComplete ? 'Complete' : 'Pending'}
-                          </Button>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
                             onClick={() => setRemoveConfirmOpen(index)}
                             disabled={isLoading || readOnly}
                             className="text-destructive hover:text-destructive w-full"

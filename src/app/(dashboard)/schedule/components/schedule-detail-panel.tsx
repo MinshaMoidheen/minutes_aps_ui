@@ -9,6 +9,7 @@ import { Calendar, Clock, MapPin, Users, FileText, User, Building, X } from 'luc
 import type { Schedule } from '@/store/api/scheduleApi'
 import { useGetSchedulesQuery } from '@/store/api/scheduleApi'
 import { useMemo } from 'react'
+import { useRouter } from 'next/navigation'
 
 interface ScheduleDetailPanelProps {
   schedule: Schedule | null
@@ -17,6 +18,8 @@ interface ScheduleDetailPanelProps {
 }
 
 export function ScheduleDetailPanel({ schedule, isOpen, onClose }: ScheduleDetailPanelProps) {
+  const router = useRouter()
+  
   // Normalize clientId to a string (handle cases where clientId is an object)
   const clientIdForQuery = useMemo(() => {
     const cid: any = (schedule as any)?.clientId
@@ -39,12 +42,15 @@ export function ScheduleDetailPanel({ schedule, isOpen, onClose }: ScheduleDetai
   
   const previousMeetings = previousMeetingsData?.schedules || []
 
-  // Sort meetings by date in descending order (newest first)
-  const sortedPreviousMeetings = [...previousMeetings].sort((a, b) => {
-    const dateA = new Date(a.startDate).getTime()
-    const dateB = new Date(b.startDate).getTime()
-    return dateB - dateA // Descending order
-  })
+  // Filter out the current meeting and sort by date in descending order (newest first)
+  const currentMeetingId = schedule?._id
+  const filteredAndSortedMeetings = [...previousMeetings]
+    .filter((meeting) => meeting._id !== currentMeetingId)
+    .sort((a, b) => {
+      const dateA = new Date(a.startDate).getTime()
+      const dateB = new Date(b.startDate).getTime()
+      return dateB - dateA // Descending order
+    })
 
   if (!isOpen || !schedule) return null
 
@@ -221,13 +227,17 @@ export function ScheduleDetailPanel({ schedule, isOpen, onClose }: ScheduleDetai
                   <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary mx-auto"></div>
                   <p className="text-xs text-muted-foreground mt-2">Loading...</p>
                 </div>
-              ) : sortedPreviousMeetings.length > 0 ? (
+              ) : filteredAndSortedMeetings.length > 0 ? (
                 <div className="space-y-3 max-h-[400px] overflow-y-auto">
-                  {sortedPreviousMeetings.map((meeting) => (
+                  {filteredAndSortedMeetings.map((meeting) => (
                     <div key={meeting._id} className="border rounded-md p-3 space-y-2">
                       <div className="flex items-center justify-between">
-                        <h4 className="font-medium text-sm">{meeting.title}</h4>
-                        {getStatusBadge(meeting.status)}
+                        <h4 
+                          className="font-medium text-sm cursor-pointer hover:text-primary transition-colors"
+                          onClick={() => router.push(`/schedule/${meeting._id}`)}
+                        >
+                          {meeting.title}
+                        </h4>
                       </div>
                       
                       {/* Date */}
@@ -257,10 +267,18 @@ export function ScheduleDetailPanel({ schedule, isOpen, onClose }: ScheduleDetai
                       {(meeting as any).meetingPoints && (meeting as any).meetingPoints.length > 0 && (
                         <div className="mt-2 pt-2 border-t">
                           <span className="text-xs font-medium">Points Discussed:</span>
-                          <ul className="text-xs text-muted-foreground list-disc list-inside mt-1 space-y-1">
-                            {(meeting as any).meetingPoints.map((point: any, index: number) => (
-                              <li key={index}>{point.pointsDiscussed || 'N/A'}</li>
-                            ))}
+                          <ul className="text-xs list-disc list-inside mt-1 space-y-1">
+                            {(meeting as any).meetingPoints.map((point: any, index: number) => {
+                              const isComplete = point.status === 'complete'
+                              return (
+                                <li 
+                                  key={index}
+                                  className={isComplete ? 'text-green-600 font-medium' : 'text-red-600 font-medium'}
+                                >
+                                  {point.pointsDiscussed || 'N/A'}
+                                </li>
+                              )
+                            })}
                           </ul>
                         </div>
                       )}

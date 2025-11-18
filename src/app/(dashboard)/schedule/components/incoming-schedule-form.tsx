@@ -25,7 +25,7 @@ import {
 import { Checkbox } from '@/components/ui/checkbox'
 import { toast } from '@/hooks/use-toast'
 import { Schedule } from '../page'
-import { useGetClientsQuery } from '@/store/api/clientApi'
+import { useGetCommonClientsQuery } from '@/store/api/clientApi'
 import { useGetClientAttendeesQuery } from '@/store/api/clientAttendeesApi'
 import { useGetMeetingTypesQuery } from '@/store/api/meetingTypeApi'
 import { useCreateScheduleMutation, useUpdateScheduleMutation } from '@/store/api/scheduleApi'
@@ -131,13 +131,13 @@ export function IncomingScheduleForm({ mode, schedule, onSuccess, onCancel, onVi
     },
   })
 
-  const { data: clientsData } = useGetClientsQuery({ limit: 100, offset: 0 })
+  const { data: clientsData } = useGetCommonClientsQuery({ limit: 100, offset: 0 })
   
   const selectedClientId = form.watch('clientId')
   const { data: attendeesResp } = useGetClientAttendeesQuery({ 
     limit: 100, 
-    offset: 0,
-    clientId: selectedClientId || undefined 
+    offset: 0
+    // Removed clientId filter to show all attendees regardless of client selection
   })
 
 
@@ -284,12 +284,7 @@ export function IncomingScheduleForm({ mode, schedule, onSuccess, onCancel, onVi
   const isAllSelected = selectedAttendees.length === filteredAttendeeIds.length && filteredAttendeeIds.length > 0
   const isNoneSelected = selectedAttendees.length === 0
   
-  // Update attendeeIds when client changes
-  useEffect(() => {
-    if (selectedClientId && mode === 'create') {
-      form.setValue('attendeeIds', filteredAttendeeIds)
-    }
-  }, [selectedClientId, filteredAttendeeIds, mode, form])
+  // Removed auto-select attendees when client changes - users can now manually select any attendees
 
   return (
     <Form {...form}>

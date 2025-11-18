@@ -1,4 +1,5 @@
 import { baseApi } from './baseApi'
+import employeesJson from '@/data/employees.json'
 
 // Client Attendee interfaces (same fields as client)
 export interface ClientAttendee {
@@ -79,12 +80,74 @@ export const clientAttendeesApi = baseApi.injectEndpoints({
 
     // Get all client attendees
     getClientAttendees: builder.query<GetClientAttendeesResponse, { limit?: number; offset?: number; search?: string; clientId?: string; isActive?: boolean }>({
-      query: ({ limit = 10, offset = 0, search = '', clientId, isActive } = {}) => ({
-        url: '/client-attendees',
-        method: 'GET',
-        params: { limit, offset, search, clientId, isActive },
-        credentials: 'include',
-      }),
+      queryFn: async ({ limit = 100, offset = 0, search = '', clientId, isActive } = {}) => {
+        try {
+          // Get employees from JSON file
+          let employees = (employeesJson as any).employees || []
+          
+          // Filter by active status
+          if (isActive !== undefined) {
+            employees = employees.filter((emp: any) => 
+              isActive ? emp.activeStatus === true : emp.activeStatus === false
+            )
+          } else {
+            // Default: show only active employees
+            employees = employees.filter((emp: any) => emp.activeStatus === true)
+          }
+          
+          // Filter by not deleted
+          employees = employees.filter((emp: any) => 
+            !emp.isDeleted || emp.isDeleted?.status === false
+          )
+          
+          // Filter by search term if provided
+          // Note: Removed clientId filtering to show all attendees regardless of client selection
+          if (search) {
+            const searchLower = search.toLowerCase()
+            employees = employees.filter((emp: any) => 
+              emp.empName?.toLowerCase().includes(searchLower) ||
+              emp.empCode?.toLowerCase().includes(searchLower) ||
+              emp.email?.toLowerCase().includes(searchLower) ||
+              emp._id?.toLowerCase().includes(searchLower)
+            )
+          }
+          
+          // Map employees to attendee format
+          const mappedAttendees = employees.map((emp: any) => ({
+            _id: emp._id,
+            username: emp.empName || '',
+            email: emp.email || `${emp.empCode}@employee.com`,
+            phoneNumber: emp.PermanentContactNo || emp.CurrentContactNo || '',
+            clientId: emp.companyId || '',
+            empCode: emp.empCode,
+            designation: emp.designationId?.designationName || '',
+            department: emp.departmentId?.departmentName || '',
+            source: 'json',
+          }))
+          
+          // Apply pagination
+          const total = mappedAttendees.length
+          const paginatedAttendees = mappedAttendees.slice(offset, offset + limit)
+          
+          return {
+            data: {
+              code: 'Success',
+              message: 'Attendees retrieved successfully',
+              data: {
+                attendees: paginatedAttendees,
+                pagination: {
+                  currentPage: Math.floor(offset / limit) + 1,
+                  totalPages: Math.ceil(total / limit),
+                  totalItems: total,
+                  itemsPerPage: limit,
+                }
+              }
+            }
+          }
+        } catch (error: any) {
+          return { error: { status: 'FETCH_ERROR', error: error.message } }
+        }
+      },
       providesTags: ['ClientAttendee'],
     }),
 

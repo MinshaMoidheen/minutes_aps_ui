@@ -1,0 +1,107 @@
+{
+  "clients": [
+    {
+      "isDeleted": {
+        "status": false,
+        "deletedTime": "2025-06-21T07:23:06.052Z"
+      },
+      "grossPFESIApplicable": false,
+      "emailIds": [],
+      "_id": "68565ddad33dd477cd5a7d27",
+      "companyId": "68524da51045716da0584191",
+      "companyCode": "101",
+      "companyName": "BAJAJ FINANCE LIMITED",
+      "isActive": true,
+      "remarks": "Created during import for unit UNTAPS017434",
+      "createdAt": "2025-06-21T07:23:06.052Z",
+      "updatedAt": "2025-08-02T05:21:37.642Z",
+      "__v": 0
+    },
+    {
+      "isDeleted": {
+        "status": false,
+        "deletedTime": "2025-06-21T07:23:06.053Z"
+      },
+      "grossPFESIApplicable": false,
+      "emailIds": [],
+      "_id": "68565ddad33dd477cd5a7d29",
+      "companyId": "68524da51045716da0584191",
+      "companyCode": "101",
+      "companyName": "MEGHA ENGINEERING & INFRASTRUCTURES LIMITED",
+      "isActive": true,
+      "remarks": "Created during import for unit UNTAPS017439",
+      "createdAt": "2025-06-21T07:23:06.053Z",
+      "updatedAt": "2025-08-02T05:21:37.670Z",
+      "__v": 0
+    },
+    {
+      "isDeleted": {
+        "status": false,
+        "deletedTime": "2025-06-21T07:23:06.054Z"
+      },
+      "grossPFESIApplicable": false,
+      "emailIds": [],
+      "_id": "68565ddad33dd477cd5a7d2b",
+      "companyId": "68524da51045716da0584191",
+      "companyCode": "101",
+      "companyName": "HYATT CENTRIC",
+      "isActive": true,
+      "remarks": "Created during import for unit UNTAPS017481",
+      "createdAt": "2025-06-21T07:23:06.054Z",
+      "updatedAt": "2025-07-21T04:44:18.575Z",
+      "__v": 0
+    },
+    {
+      "isDeleted": {
+        "status": false,
+        "deletedTime": "2025-06-21T07:23:06.061Z"
+      },
+      "grossPFESIApplicable": false,
+      "emailIds": [],
+      "_id": "68565ddad33dd477cd5a7d3b",
+      "companyId": "68524da51045716da0584191",
+      "companyCode": "101",
+      "companyName": "SHRIRAM AUTOMALL INDIA LIMITED",
+      "isActive": true,
+      "remarks": "Created during import for unit UNTAPS017469",
+      "createdAt": "2025-06-21T07:23:06.061Z",
+      "updatedAt": "2025-08-02T05:21:37.905Z",
+      "__v": 0
+    },
+    {
+      "isDeleted": {
+        "status": false,
+        "deletedTime": "2025-06-21T07:23:06.066Z"
+      },
+      "grossPFESIApplicable": false,
+      "emailIds": [],
+      "_id": "68565ddad33dd477cd5a7d47",
+      "companyId": "68524da51045716da0584191",
+      "companyCode": "2024",
+      "companyName": "BLINKIT",
+      "isActive": true,
+      "remarks": "Created during import for unit UNTAPS017522",
+      "createdAt": "2025-06-21T07:23:06.067Z",
+      "updatedAt": "2025-08-02T05:21:31.774Z",
+      "__v": 0
+    },
+    {
+      "isDeleted": {
+        "status": false,
+        "deletedTime": "2025-06-21T07:23:06.067Z"
+      },
+      "grossPFESIApplicable": false,
+      "emailIds": [],
+      "_id": "68565ddad33dd477cd5a7d49",
+      "companyId": "68524da51045716da0584191",
+      "companyCode": "2024",
+      "companyName": "NAV INDIA",
+      "isActive": true,
+      "remarks": "Created during import for unit UNTAPS017534",
+      "createdAt": "2025-06-21T07:23:06.068Z",
+      "updatedAt": "2025-06-21T07:23:06.068Z",
+      "__v": 0
+    }
+  ]
+}
+

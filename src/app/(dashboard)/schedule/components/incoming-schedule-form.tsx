@@ -28,7 +28,7 @@ import { Schedule } from '../page'
 import { useGetCommonClientsQuery } from '@/store/api/clientApi'
 import { useGetClientAttendeesQuery } from '@/store/api/clientAttendeesApi'
 import { useGetMeetingTypesQuery } from '@/store/api/meetingTypeApi'
-import { useCreateScheduleMutation, useUpdateScheduleMutation } from '@/store/api/scheduleApi'
+import { useCreateScheduleMutation, useUpdateScheduleMutation, useGetScheduleByIdQuery } from '@/store/api/scheduleApi'
 import { Eye, EyeOff } from 'lucide-react'
 import {
   AlertDialog,
@@ -40,6 +40,38 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table'
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover'
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from '@/components/ui/command'
+import { UserPlus, Check, ChevronsUpDown, Plus } from 'lucide-react'
+import { useCreateClientMutation } from '@/store/api/clientApi'
+import { cn } from '@/lib/utils'
 
 const incomingScheduleFormSchema = z.object({
   title: z
@@ -111,6 +143,10 @@ interface IncomingScheduleFormProps {
 
 export function IncomingScheduleForm({ mode, schedule, onSuccess, onCancel, onViewDetails, onToggleDetailPanel, isDetailPanelOpen, readOnly = false }: IncomingScheduleFormProps) {
   const [removeConfirmOpen, setRemoveConfirmOpen] = useState<number | null>(null)
+  const [showAttendeeModal, setShowAttendeeModal] = useState(false)
+  const [attendeeSearchValue, setAttendeeSearchValue] = useState('')
+  const [accountabilityClientOpen, setAccountabilityClientOpen] = useState<{ [key: number]: boolean }>({})
+  const [accountabilityClientSearch, setAccountabilityClientSearch] = useState<{ [key: number]: string }>({})
   const form = useForm<IncomingScheduleFormData>({
     resolver: zodResolver(incomingScheduleFormSchema),
     defaultValues: {
@@ -132,6 +168,9 @@ export function IncomingScheduleForm({ mode, schedule, onSuccess, onCancel, onVi
   })
 
   const { data: clientsData } = useGetCommonClientsQuery({ limit: 100, offset: 0 })
+  const [createClient, { isLoading: isCreatingClient }] = useCreateClientMutation()
+  const [clientOpen, setClientOpen] = useState(false)
+  const [clientSearchValue, setClientSearchValue] = useState('')
   
   const selectedClientId = form.watch('clientId')
   const { data: attendeesResp } = useGetClientAttendeesQuery({ 
@@ -140,10 +179,65 @@ export function IncomingScheduleForm({ mode, schedule, onSuccess, onCancel, onVi
     // Removed clientId filter to show all attendees regardless of client selection
   })
 
+  // Fetch schedule by ID if editing and schedule ID is available (to get populated fields)
+  const { data: scheduleByIdData } = useGetScheduleByIdQuery(
+    schedule?._id || '', 
+    { skip: mode !== 'edit' || !schedule?._id }
+  )
+  
+  // NOTE: The backend populate() replaces clientId and attendeeIds with null/[] when referenced documents don't exist.
+  // This is a backend issue that needs to be fixed. The backend should preserve original IDs even when populate fails.
+  // For now, we'll work with what we have and the form will show empty values if IDs are missing.
+  
+  // Use fetched schedule if available, but fallback to original schedule's IDs if populated values are null/empty
+  // This handles cases where populate fails but the original IDs exist
+  const scheduleToUse = useMemo(() => {
+    const fetched = scheduleByIdData?.schedule
+    if (!fetched) return schedule
+    
+    // If fetched schedule has null/empty clientId or attendeeIds, try to get from original schedule
+    const result = { ...fetched }
+    
+    // Preserve clientId from original if fetched is null/empty
+    // Even though original might also be null, we check both
+    if ((!fetched.clientId || fetched.clientId === null)) {
+      // Try original schedule first
+      if (schedule?.clientId) {
+        const originalClientId = typeof schedule.clientId === 'object' && schedule.clientId !== null
+          ? (schedule.clientId as any)?._id
+          : schedule.clientId
+        if (originalClientId) {
+          result.clientId = originalClientId
+        }
+      }
+    }
+    
+    // Preserve attendeeIds from original if fetched is empty
+    if (!fetched.attendeeIds || fetched.attendeeIds.length === 0) {
+      // Try original schedule first
+      if (schedule?.attendeeIds && schedule.attendeeIds.length > 0) {
+        const originalAttendeeIds = (schedule.attendeeIds as any[])
+          .map((v: any) => {
+            if (typeof v === 'string') return v
+            if (typeof v === 'object' && v !== null && v._id) return v._id
+            return null
+          })
+          .filter((v: any): v is string => typeof v === 'string' && v.trim() !== '')
+        
+        if (originalAttendeeIds.length > 0) {
+          result.attendeeIds = originalAttendeeIds
+        }
+      }
+    }
+    
+    return result
+  }, [scheduleByIdData?.schedule, schedule])
 
   // Populate form with schedule data when editing
   useEffect(() => {
-    if (mode === 'edit' && schedule) {
+    // Wait for data to load before populating form
+    // Use scheduleToUse which may be fetched with populated fields
+    if (mode === 'edit' && scheduleToUse && clientsData !== undefined && attendeesResp !== undefined) {
       // Format dates from ISO string to YYYY-MM-DD format for date inputs
       const formatDateForInput = (dateString: string) => {
         if (!dateString) return ''
@@ -159,53 +253,90 @@ export function IncomingScheduleForm({ mode, schedule, onSuccess, onCancel, onVi
       }
 
       // Extract meetingTypeId - it might be an object if populated or a string
-      const meetingTypeId = typeof (schedule as any).meetingTypeId === 'object' 
-        ? (schedule as any).meetingTypeId?._id 
-        : (schedule as any).meetingTypeId
+      const meetingTypeId = typeof (scheduleToUse as any).meetingTypeId === 'object' 
+        ? (scheduleToUse as any).meetingTypeId?._id 
+        : (scheduleToUse as any).meetingTypeId
         
-      // Extract clientId - it might be an object if populated or a string
-      const clientId = typeof schedule.clientId === 'object'
-        ? (schedule.clientId as any)?._id
-        : schedule.clientId
+      // Extract clientId - it might be an object if populated, a string, or in a client field
+      let clientId: string | undefined = undefined
+      if ((scheduleToUse as any).clientId) {
+        if (typeof (scheduleToUse as any).clientId === 'object' && (scheduleToUse as any).clientId !== null) {
+          clientId = (scheduleToUse as any).clientId?._id
+        } else if (typeof (scheduleToUse as any).clientId === 'string') {
+          clientId = (scheduleToUse as any).clientId
+        }
+      }
+      // Also check if client is populated separately
+      if (!clientId && (scheduleToUse as any).client && typeof (scheduleToUse as any).client === 'object') {
+        clientId = (scheduleToUse as any).client?._id
+      }
 
-      const attendeeIdsFromSchedule = Array.isArray((schedule as any).attendeeIds)
-        ? (schedule as any).attendeeIds
-            .map((v: any) => (typeof v === 'string' ? v : v?._id))
-            .filter((v: any) => typeof v === 'string' && v.trim())
-        : Array.isArray((schedule as any).attendees)
-        ? (schedule as any).attendees
-            .map((a: any) => a?._id)
-            .filter((v: any) => typeof v === 'string' && v.trim())
-        : []
-
-      const formData = {
-        title: schedule.title || '',
-        meetingTypeId: meetingTypeId || '',   
-        startDate: formatDateForInput(schedule.startDate),
-        endDate: formatDateForInput(schedule.endDate),
-        startTime: schedule.startTime || '',
-        endTime: schedule.endTime || '',
-        location: schedule.location || '',
-        clientId: clientId || '',
-        attendeeIds: attendeeIdsFromSchedule,
-        agenda: (schedule as any).agenda || '',
-        meetingPoints: ((schedule as any).meetingPoints || []).map((mp: any) => ({
-          ...mp,
-          status: mp.status || 'pending'
-        })),
-        closureReport: (schedule as any).closureReport || '',
-        otherAttendees: (schedule as any).otherAttendees || '',
-        organizer: (schedule as any).organizer || '',
+      // Extract attendeeIds - handle both populated and non-populated cases
+      let attendeeIdsFromSchedule: string[] = []
+      
+      // Check attendeeIds field (might be array of strings or array of objects)
+      if (Array.isArray((scheduleToUse as any).attendeeIds)) {
+        attendeeIdsFromSchedule = (scheduleToUse as any).attendeeIds
+          .map((v: any) => {
+            if (typeof v === 'string') return v
+            if (typeof v === 'object' && v !== null && v._id) return v._id
+            return null
+          })
+          .filter((v: any): v is string => typeof v === 'string' && v.trim() !== '')
       }
       
-      console.log('Form reset data:', formData)
-      console.log('Schedule data:', schedule)
+      // If attendeeIds is empty, check attendees field (populated array)
+      if (attendeeIdsFromSchedule.length === 0 && Array.isArray((scheduleToUse as any).attendees)) {
+        attendeeIdsFromSchedule = (scheduleToUse as any).attendees
+          .map((a: any) => {
+            if (typeof a === 'string') return a
+            if (typeof a === 'object' && a !== null && a._id) return a._id
+            return null
+          })
+          .filter((v: any): v is string => typeof v === 'string' && v.trim() !== '')
+      }
+
+      const formData = {
+        title: scheduleToUse.title || '',
+        meetingTypeId: meetingTypeId || '',   
+        startDate: formatDateForInput(scheduleToUse.startDate),
+        endDate: formatDateForInput(scheduleToUse.endDate),
+        startTime: scheduleToUse.startTime || '',
+        endTime: scheduleToUse.endTime || '',
+        location: scheduleToUse.location || '',
+        clientId: clientId || '',
+        attendeeIds: attendeeIdsFromSchedule,
+        agenda: (scheduleToUse as any).agenda || '',
+        meetingPoints: ((scheduleToUse as any).meetingPoints || []).map((mp: any) => ({
+          ...mp,
+          status: mp.status || 'pending',
+          // If accountability is a client ID (not "admin"), add "client:" prefix for display
+          accountability: mp.accountability && mp.accountability !== 'admin' && !mp.accountability.startsWith('client:')
+            ? `client:${mp.accountability}`
+            : mp.accountability
+        })),
+        closureReport: (scheduleToUse as any).closureReport || '',
+        otherAttendees: (scheduleToUse as any).otherAttendees || '',
+        organizer: (scheduleToUse as any).organizer || '',
+      }
+      
+      console.log('=== Form Population Debug ===')
+      console.log('Original schedule.clientId:', (schedule as any)?.clientId)
+      console.log('Original schedule.attendeeIds:', (schedule as any)?.attendeeIds)
+      console.log('Fetched schedule.clientId:', (scheduleByIdData?.schedule as any)?.clientId)
+      console.log('Fetched schedule.attendeeIds:', (scheduleByIdData?.schedule as any)?.attendeeIds)
+      console.log('ScheduleToUse.clientId (after fallback):', (scheduleToUse as any).clientId)
+      console.log('ScheduleToUse.attendeeIds (after fallback):', (scheduleToUse as any).attendeeIds)
+      console.log('ScheduleToUse.client (populated):', (scheduleToUse as any).client)
+      console.log('ScheduleToUse.attendees (populated):', (scheduleToUse as any).attendees)
       console.log('MeetingTypeId extracted:', meetingTypeId)
       console.log('ClientId extracted:', clientId)
+      console.log('AttendeeIds extracted:', attendeeIdsFromSchedule)
+      console.log('Form reset data:', formData)
       
       form.reset(formData)
     }
-  }, [mode, schedule])
+  }, [mode, schedule, scheduleByIdData, clientsData, attendeesResp, form])
 
   const { data: meetingTypesData } = useGetMeetingTypesQuery({ limit: 100, offset: 0 })
   const [createSchedule, { isLoading: isCreating }] = useCreateScheduleMutation()
@@ -217,6 +348,14 @@ export function IncomingScheduleForm({ mode, schedule, onSuccess, onCancel, onVi
       const startDateTime = new Date(`${data.startDate}T00:00:00Z`).toISOString()
       const endDateTime = new Date(`${data.endDate}T00:00:00Z`).toISOString()
       
+      // Process meetingPoints to strip "client:" prefix from accountability values
+      const processedMeetingPoints = (data.meetingPoints || []).map((mp: any) => ({
+        ...mp,
+        accountability: mp.accountability?.startsWith('client:') 
+          ? mp.accountability.replace('client:', '') 
+          : mp.accountability
+      }))
+
       const scheduleData = {
         title: data.title,
         meetingTypeId: data.meetingTypeId || undefined,
@@ -228,7 +367,7 @@ export function IncomingScheduleForm({ mode, schedule, onSuccess, onCancel, onVi
         clientId: data.clientId,
         attendeeIds: data.attendeeIds || [],
         agenda: data.agenda || '',
-        meetingPoints: data.meetingPoints,
+        meetingPoints: processedMeetingPoints,
         closureReport: data.closureReport,
         otherAttendees: data.otherAttendees,
         organizer: data.organizer,
@@ -261,15 +400,6 @@ export function IncomingScheduleForm({ mode, schedule, onSuccess, onCancel, onVi
 
   const isLoading = form.formState.isSubmitting || isCreating || isUpdating
 
-  // Helper functions for select all/deselect all
-  const handleSelectAll = () => {
-    form.setValue('attendeeIds', filteredAttendeeIds)
-  }
-
-  const handleDeselectAll = () => {
-    form.setValue('attendeeIds', [])
-  }
-
   const selectedAttendees = form.watch('attendeeIds') || []
 
   // Filter attendees based on selected client (already filtered by API, but keep for safety)
@@ -277,14 +407,123 @@ export function IncomingScheduleForm({ mode, schedule, onSuccess, onCancel, onVi
     return attendeesResp?.data?.attendees || []
   }, [attendeesResp?.data?.attendees])
   
+  // Filter attendees by search term for modal
+  const filteredAttendeesForModal = useMemo(() => {
+    if (!attendeeSearchValue) return filteredAttendees
+    const searchLower = attendeeSearchValue.toLowerCase()
+    return filteredAttendees.filter((attendee: any) =>
+      attendee.username?.toLowerCase().includes(searchLower) ||
+      attendee.email?.toLowerCase().includes(searchLower) ||
+      attendee.empCode?.toLowerCase().includes(searchLower)
+    )
+  }, [filteredAttendees, attendeeSearchValue])
+  
   const filteredAttendeeIds = useMemo(() => {
-    return filteredAttendees.map((attendee: any) => attendee._id)
-  }, [filteredAttendees])
+    return filteredAttendeesForModal.map((attendee: any) => attendee._id)
+  }, [filteredAttendeesForModal])
   
-  const isAllSelected = selectedAttendees.length === filteredAttendeeIds.length && filteredAttendeeIds.length > 0
-  const isNoneSelected = selectedAttendees.length === 0
+  const isAllFilteredSelected = useMemo(() => {
+    return filteredAttendeeIds.length > 0 && 
+           filteredAttendeeIds.every((id: string) => selectedAttendees.includes(id))
+  }, [filteredAttendeeIds, selectedAttendees])
   
-  // Removed auto-select attendees when client changes - users can now manually select any attendees
+  const isSomeFilteredSelected = useMemo(() => {
+    return filteredAttendeeIds.some((id: string) => selectedAttendees.includes(id)) &&
+           !isAllFilteredSelected
+  }, [filteredAttendeeIds, selectedAttendees, isAllFilteredSelected])
+  
+  const handleSelectAllAttendees = () => {
+    const currentValue = form.getValues('attendeeIds') || []
+    const newValue = [...new Set([...currentValue, ...filteredAttendeeIds])]
+    form.setValue('attendeeIds', newValue)
+  }
+  
+  const handleDeselectAllAttendees = () => {
+    const currentValue = form.getValues('attendeeIds') || []
+    const newValue = currentValue.filter((id: string) => !filteredAttendeeIds.includes(id))
+    form.setValue('attendeeIds', newValue)
+  }
+  
+  const handleToggleAttendee = (attendeeId: string) => {
+    const currentValue = form.getValues('attendeeIds') || []
+    if (currentValue.includes(attendeeId)) {
+      form.setValue('attendeeIds', currentValue.filter((id: string) => id !== attendeeId))
+    } else {
+      form.setValue('attendeeIds', [...currentValue, attendeeId])
+    }
+  }
+  
+  // Get selected attendee names for display
+  const selectedAttendeeNames = useMemo(() => {
+    return filteredAttendees
+      .filter((attendee: any) => selectedAttendees.includes(attendee._id))
+      .map((attendee: any) => attendee.username)
+      .join(', ')
+  }, [filteredAttendees, selectedAttendees])
+
+  // Get clients list
+  const clients = useMemo(() => {
+    return (clientsData as any)?.data?.clients || clientsData?.clients || []
+  }, [clientsData])
+
+  // Filter clients by search
+  const filteredClients = useMemo(() => {
+    if (!clientSearchValue) return clients
+    const searchLower = clientSearchValue.toLowerCase()
+    return clients.filter((client: any) =>
+      client.username?.toLowerCase().includes(searchLower) ||
+      client.email?.toLowerCase().includes(searchLower) ||
+      client.companyName?.toLowerCase().includes(searchLower) ||
+      client.companyCode?.toLowerCase().includes(searchLower)
+    )
+  }, [clients, clientSearchValue])
+
+  // Check if search value matches any existing client
+  const canCreateClient = useMemo(() => {
+    if (!clientSearchValue.trim()) return false
+    return !clients.some((client: any) =>
+      client.username?.toLowerCase() === clientSearchValue.toLowerCase() ||
+      client.email?.toLowerCase() === clientSearchValue.toLowerCase() ||
+      client.companyName?.toLowerCase() === clientSearchValue.toLowerCase()
+    )
+  }, [clients, clientSearchValue])
+
+  // Get selected client display value
+  const selectedClient = useMemo(() => {
+    if (!selectedClientId) return null
+    return clients.find((client: any) => client._id === selectedClientId)
+  }, [clients, selectedClientId])
+
+  const handleCreateClient = async () => {
+    if (!clientSearchValue.trim() || !canCreateClient) return
+    
+    try {
+      // Extract email from search value if it contains email format
+      const emailMatch = clientSearchValue.match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/)
+      const email = emailMatch ? emailMatch[1] : `${clientSearchValue.toLowerCase().replace(/\s+/g, '')}@company.com`
+      const username = clientSearchValue.split('(')[0].trim() || clientSearchValue.trim()
+      
+      const newClient = await createClient({
+        username: username,
+        email: email,
+        phoneNumber: '',
+      }).unwrap()
+      
+      form.setValue('clientId', newClient.client._id)
+      setClientOpen(false)
+      setClientSearchValue('')
+      toast({
+        title: 'Client Created',
+        description: `${username} has been created successfully.`,
+      })
+    } catch (error: any) {
+      toast({
+        title: 'Create Failed',
+        description: error?.data?.message || 'Failed to create client.',
+        variant: 'destructive',
+      })
+    }
+  }
 
   return (
     <Form {...form}>
@@ -438,31 +677,93 @@ export function IncomingScheduleForm({ mode, schedule, onSuccess, onCancel, onVi
 
             {/* Status removed; computed server-side */}
 
-            {/* Client Selection */}
+            {/* Client Selection - Creatable Select */}
             <FormField
               control={form.control}
               name="clientId"
               render={({ field }) => (
                 <FormItem>
                   <FormLabel>Client</FormLabel>
-                  <Select key={`client-${field.value || 'none'}`} onValueChange={field.onChange} value={field.value}>
-                    <FormControl>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select a client" />
-                      </SelectTrigger>
-                    </FormControl>
-                    <SelectContent>
-                      {(clientsData as any)?.data?.clients?.map((client: any) => (
-                        <SelectItem key={client._id} value={client._id}>
-                          {client.username} ({client.email})
-                        </SelectItem>
-                      )) || clientsData?.clients?.map((client: any) => (
-                        <SelectItem key={client._id} value={client._id}>
-                          {client.username} ({client.email})
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <Popover open={clientOpen} onOpenChange={setClientOpen}>
+                    <PopoverTrigger asChild>
+                      <FormControl>
+                        <Button
+                          variant="outline"
+                          role="combobox"
+                          className={cn(
+                            "w-full justify-between",
+                            !field.value && "text-muted-foreground"
+                          )}
+                          disabled={isLoading || readOnly}
+                        >
+                          {selectedClient
+                            ? `${selectedClient.username} (${selectedClient.email})`
+                            : "Select a client"}
+                          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                        </Button>
+                      </FormControl>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-[400px] p-0" align="start">
+                      <Command shouldFilter={false}>
+                        <CommandInput
+                          placeholder="Search clients or create new..."
+                          value={clientSearchValue}
+                          onValueChange={setClientSearchValue}
+                        />
+                        <CommandList>
+                          <CommandEmpty>
+                            {canCreateClient && clientSearchValue.trim() ? (
+                              <div className="py-2 px-2">
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={handleCreateClient}
+                                  disabled={isCreatingClient}
+                                  className="w-full justify-start"
+                                >
+                                  <Plus className="mr-2 h-4 w-4" />
+                                  Create "{clientSearchValue}"
+                                </Button>
+                              </div>
+                            ) : (
+                              "No clients found."
+                            )}
+                          </CommandEmpty>
+                          <CommandGroup>
+                            {filteredClients.map((client: any) => (
+                              <CommandItem
+                                key={client._id}
+                                value={`${client.username} ${client.email} ${client.companyName || ''} ${client.companyCode || ''}`}
+                                onSelect={() => {
+                                  field.onChange(client._id)
+                                  setClientOpen(false)
+                                  setClientSearchValue('')
+                                }}
+                              >
+                                <Check
+                                  className={cn(
+                                    "mr-2 h-4 w-4",
+                                    field.value === client._id ? "opacity-100" : "opacity-0"
+                                  )}
+                                />
+                                {client.username} ({client.email})
+                              </CommandItem>
+                            ))}
+                            {canCreateClient && clientSearchValue.trim() && filteredClients.length > 0 && (
+                              <CommandItem
+                                onSelect={handleCreateClient}
+                                className="text-primary font-medium"
+                              >
+                                <Plus className="mr-2 h-4 w-4" />
+                                Create "{clientSearchValue}"
+                              </CommandItem>
+                            )}
+                          </CommandGroup>
+                        </CommandList>
+                      </Command>
+                    </PopoverContent>
+                  </Popover>
                   <FormMessage />
                 </FormItem>
               )}
@@ -488,77 +789,124 @@ export function IncomingScheduleForm({ mode, schedule, onSuccess, onCancel, onVi
           </div>
 
           {/* Attendees Selection */}
-          <div className="md:col-span-2 space-y-4">
-            <div className="flex items-center justify-between">
-              <FormLabel>Attendees</FormLabel>
-              <div className="flex space-x-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={handleSelectAll}
-                  disabled={isLoading || isAllSelected}
-                >
-                  Select All
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={handleDeselectAll}
-                  disabled={isLoading || isNoneSelected}
-                >
-                  Deselect All
-                </Button>
-              </div>
-            </div>
-            <FormField
-              control={form.control}
-              name="attendeeIds"
-              render={({ field }) => (
-                <>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-h-48 overflow-y-auto border rounded-md p-4">
-                    {filteredAttendees.length === 0 ? (
-                      <div className="col-span-2 text-center text-muted-foreground py-8">
-                        {selectedClientId ? 'No attendees found for selected client' : 'Please select a client first'}
+          <FormField
+            control={form.control}
+            name="attendeeIds"
+            render={({ field }) => (
+              <FormItem className="md:col-span-2">
+                <div className="flex items-center justify-between">
+                  <FormLabel>Attendees</FormLabel>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setShowAttendeeModal(true)}
+                    disabled={isLoading || readOnly}
+                    className="flex items-center gap-2"
+                  >
+                    <UserPlus className="h-4 w-4" />
+                    Add Attendees
+                  </Button>
+                </div>
+                <FormControl>
+                  <div className="min-h-[60px] border rounded-md p-3">
+                    {selectedAttendees.length > 0 ? (
+                      <div className="text-sm">
+                        <span className="font-medium">{selectedAttendees.length} attendee{selectedAttendees.length !== 1 ? 's' : ''} selected:</span>
+                        <p className="text-muted-foreground mt-1">{selectedAttendeeNames}</p>
                       </div>
                     ) : (
-                      filteredAttendees.map((attendee) => (
-                      <div key={attendee._id} className="flex items-start space-x-3">
-                        <Checkbox
-                          id={`attendee-${attendee._id}`}
-                          checked={(field.value || []).includes(attendee._id)}
-                          onCheckedChange={(checked) => {
-                            const currentValue = field.value || []
-                            const newValue = checked
-                              ? [...currentValue, attendee._id]
-                              : currentValue.filter((value: string) => value !== attendee._id)
-                            field.onChange(newValue)
-                          }}
-                          disabled={isLoading}
-                        />
-                        <label
-                          htmlFor={`attendee-${attendee._id}`}
-                          className="space-y-1 leading-none cursor-pointer"
-                        >
-                          <div className="text-sm font-medium">
-                            {attendee.username}
-                          </div>
-                          <p className="text-xs text-muted-foreground">
-                            {attendee.email}
-                          </p>
-                        </label>
-                      </div>
-                    )))}
+                      <p className="text-sm text-muted-foreground">No attendees selected. Click "Add Attendees" to select.</p>
+                    )}
                   </div>
-                  <div className="text-sm text-muted-foreground mt-2">
-                    {selectedAttendees.length} of {filteredAttendeeIds.length} attendees selected
-                  </div>
-                  <FormMessage />
-                </>
-              )}
-            />
-          </div>
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+          
+          {/* Attendees Selection Modal */}
+          <Dialog open={showAttendeeModal} onOpenChange={setShowAttendeeModal}>
+            <DialogContent className="max-w-3xl max-h-[80vh] flex flex-col">
+              <DialogHeader>
+                <DialogTitle>Select Attendees</DialogTitle>
+                <DialogDescription>
+                  Search and select attendees for this meeting
+                </DialogDescription>
+              </DialogHeader>
+              <div className="flex-1 overflow-hidden flex flex-col space-y-4">
+                <div>
+                  <Input
+                    type="text"
+                    placeholder="Search attendees..."
+                    value={attendeeSearchValue}
+                    onChange={(e) => setAttendeeSearchValue(e.target.value)}
+                    className="w-full"
+                  />
+                </div>
+                <div className="flex-1 overflow-y-auto border rounded-md">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="w-[50px]">
+                          <Checkbox
+                            checked={isAllFilteredSelected}
+                            ref={(input) => {
+                              if (input) (input as any).indeterminate = isSomeFilteredSelected
+                            }}
+                            onCheckedChange={(checked) => {
+                              if (checked) {
+                                handleSelectAllAttendees()
+                              } else {
+                                handleDeselectAllAttendees()
+                              }
+                            }}
+                          />
+                        </TableHead>
+                        <TableHead>Employee Name</TableHead>
+                        <TableHead>Employee Code</TableHead>
+                        <TableHead>Email</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {filteredAttendeesForModal.length === 0 ? (
+                        <TableRow>
+                          <TableCell colSpan={4} className="text-center text-muted-foreground py-8">
+                            No attendees found
+                          </TableCell>
+                        </TableRow>
+                      ) : (
+                        filteredAttendeesForModal.map((attendee: any) => (
+                          <TableRow key={attendee._id}>
+                            <TableCell>
+                              <Checkbox
+                                checked={selectedAttendees.includes(attendee._id)}
+                                onCheckedChange={() => handleToggleAttendee(attendee._id)}
+                              />
+                            </TableCell>
+                            <TableCell className="text-sm">{attendee.username}</TableCell>
+                            <TableCell className="text-sm">{attendee.empCode || '—'}</TableCell>
+                            <TableCell className="text-sm">{attendee.email}</TableCell>
+                          </TableRow>
+                        ))
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+                <div className="text-sm text-muted-foreground">
+                  {selectedAttendees.length} of {filteredAttendees.length} attendees selected
+                </div>
+              </div>
+              <DialogFooter>
+                <Button
+                  variant="outline"
+                  onClick={() => setShowAttendeeModal(false)}
+                >
+                  Close
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
 
           {/* Agenda */}
           <FormField
@@ -626,17 +974,110 @@ export function IncomingScheduleForm({ mode, schedule, onSuccess, onCancel, onVi
                           />
                         </div>
                         <div className="col-span-12 md:col-span-3">
-                          <Textarea
-                            placeholder="Who is accountable?"
-                            value={point.accountability || ''}
-                            onChange={(e) => {
-                              const arr = [...(field.value || [])]
-                              arr[index] = { ...arr[index], accountability: e.target.value, status: arr[index].status || 'pending' }
-                              field.onChange(arr)
-                            }}
-                            className="min-h-[80px]"
-                            disabled={isLoading || readOnly}
-                          />
+                          {point.accountability === 'client' || (point.accountability && point.accountability !== 'admin' && !point.accountability.startsWith('client:')) ? (
+                            // Show client selection when "client" is selected or when a client ID is stored
+                            <Popover 
+                              open={accountabilityClientOpen[index] || false} 
+                              onOpenChange={(open) => setAccountabilityClientOpen({ ...accountabilityClientOpen, [index]: open })}
+                            >
+                              <PopoverTrigger asChild>
+                                <Button
+                                  variant="outline"
+                                  role="combobox"
+                                  className={cn(
+                                    "w-full justify-between",
+                                    !point.accountability || point.accountability === 'client' ? "text-muted-foreground" : ""
+                                  )}
+                                  disabled={isLoading || readOnly}
+                                >
+                                  {point.accountability && point.accountability !== 'client' && point.accountability !== 'admin' ? (
+                                    (() => {
+                                      const clientId = point.accountability.startsWith('client:') ? point.accountability.replace('client:', '') : point.accountability
+                                      const selectedClient = clients.find((c: any) => c._id === clientId)
+                                      return selectedClient ? `${selectedClient.username} (${selectedClient.email})` : 'Select a client'
+                                    })()
+                                  ) : (
+                                    'Select a client'
+                                  )}
+                                  <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                                </Button>
+                              </PopoverTrigger>
+                              <PopoverContent className="w-[400px] p-0" align="start">
+                                <Command shouldFilter={false}>
+                                  <CommandInput
+                                    placeholder="Search clients..."
+                                    value={accountabilityClientSearch[index] || ''}
+                                    onValueChange={(value) => setAccountabilityClientSearch({ ...accountabilityClientSearch, [index]: value })}
+                                  />
+                                  <CommandList>
+                                    <CommandEmpty>No clients found.</CommandEmpty>
+                                    <CommandGroup>
+                                      {(() => {
+                                        const searchValue = (accountabilityClientSearch[index] || '').toLowerCase()
+                                        const filtered = searchValue
+                                          ? clients.filter((client: any) =>
+                                              client.username?.toLowerCase().includes(searchValue) ||
+                                              client.email?.toLowerCase().includes(searchValue) ||
+                                              client.companyName?.toLowerCase().includes(searchValue) ||
+                                              client.companyCode?.toLowerCase().includes(searchValue)
+                                            )
+                                          : clients
+                                        return filtered.map((client: any) => {
+                                          const currentClientId = point.accountability?.startsWith('client:') 
+                                            ? point.accountability.replace('client:', '') 
+                                            : (point.accountability && point.accountability !== 'client' && point.accountability !== 'admin' ? point.accountability : '')
+                                          return (
+                                            <CommandItem
+                                              key={client._id}
+                                              value={`${client.username} ${client.email} ${client.companyName || ''} ${client.companyCode || ''}`}
+                                              onSelect={() => {
+                                                const arr = [...(field.value || [])]
+                                                arr[index] = { ...arr[index], accountability: `client:${client._id}`, status: arr[index].status || 'pending' }
+                                                field.onChange(arr)
+                                                setAccountabilityClientOpen({ ...accountabilityClientOpen, [index]: false })
+                                                setAccountabilityClientSearch({ ...accountabilityClientSearch, [index]: '' })
+                                              }}
+                                            >
+                                              <Check
+                                                className={cn(
+                                                  "mr-2 h-4 w-4",
+                                                  currentClientId === client._id ? "opacity-100" : "opacity-0"
+                                                )}
+                                              />
+                                              {client.username} ({client.email})
+                                            </CommandItem>
+                                          )
+                                        })
+                                      })()}
+                                    </CommandGroup>
+                                  </CommandList>
+                                </Command>
+                              </PopoverContent>
+                            </Popover>
+                          ) : (
+                            // Show admin/client select when not showing client selection
+                            <Select
+                              value={point.accountability === 'admin' || (point.accountability && point.accountability.startsWith('client:')) ? (point.accountability === 'admin' ? 'admin' : 'client') : (point.accountability || '')}
+                              onValueChange={(value) => {
+                                const arr = [...(field.value || [])]
+                                if (value === 'admin') {
+                                  arr[index] = { ...arr[index], accountability: 'admin', status: arr[index].status || 'pending' }
+                                } else if (value === 'client') {
+                                  arr[index] = { ...arr[index], accountability: 'client', status: arr[index].status || 'pending' }
+                                }
+                                field.onChange(arr)
+                              }}
+                              disabled={isLoading || readOnly}
+                            >
+                              <SelectTrigger className="w-full">
+                                <SelectValue placeholder="Select accountability" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="admin">Admin</SelectItem>
+                                <SelectItem value="client">Client</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          )}
                         </div>
                         <div className="col-span-12 md:col-span-1 flex flex-col items-center justify-center gap-2">
                           <Button
@@ -667,7 +1108,14 @@ export function IncomingScheduleForm({ mode, schedule, onSuccess, onCancel, onVi
                                     setRemoveConfirmOpen(null)
                                     // Persist removal in edit mode
                                     if (mode === 'edit' && schedule?._id) {
-                                      updateSchedule({ scheduleId: schedule._id, data: { meetingPoints: arr } })
+                                      // Process meetingPoints to strip "client:" prefix from accountability values
+                                      const processedArr = arr.map((mp: any) => ({
+                                        ...mp,
+                                        accountability: mp.accountability?.startsWith('client:') 
+                                          ? mp.accountability.replace('client:', '') 
+                                          : mp.accountability
+                                      }))
+                                      updateSchedule({ scheduleId: schedule._id, data: { meetingPoints: processedArr } })
                                     }
                                   }}
                                   className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
@@ -723,7 +1171,7 @@ export function IncomingScheduleForm({ mode, schedule, onSuccess, onCancel, onVi
             name="otherAttendees"
             render={({ field }) => (
               <FormItem className="md:col-span-2">
-                <FormLabel>Other Attendees</FormLabel>
+                <FormLabel>Other Attendees Email (seperated by comma)</FormLabel>
                 <FormControl>
                   <Textarea 
                     placeholder="Enter names and emails of additional attendees not in the system (one per line)..."

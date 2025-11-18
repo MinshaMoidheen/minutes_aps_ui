@@ -121,7 +121,9 @@ export default function ScheduleDetailPage() {
                                 <TableHead className='w-[30%]'>Points Discussed</TableHead>
                                 <TableHead className='w-[30%]'>Plan of Action</TableHead>
                                 <TableHead className='w-[25%]'>Accountability</TableHead>
-                                <TableHead className='w-[15%]'>Actions</TableHead>
+                                {schedule.status !== 'incoming' && (
+                                  <TableHead className='w-[15%]'>Actions</TableHead>
+                                )}
                               </TableRow>
                             </TableHeader>
                             <TableBody>
@@ -132,22 +134,24 @@ export default function ScheduleDetailPage() {
                                     <TableCell className={`align-top whitespace-pre-wrap break-words text-sm ${isComplete ? 'bg-green-50' : ''}`}>{mp.pointsDiscussed || '—'}</TableCell>
                                     <TableCell className={`align-top whitespace-pre-wrap break-words text-sm ${isComplete ? 'bg-green-50' : ''}`}>{mp.planOfAction || '—'}</TableCell>
                                     <TableCell className={`align-top whitespace-pre-wrap break-words text-sm ${isComplete ? 'bg-green-50' : ''}`}>{mp.accountability || '—'}</TableCell>
-                                    <TableCell className={`align-top ${isComplete ? 'bg-green-50' : ''}`}>
-                                      {!isComplete ? (
-                                        <Button
-                                          type="button"
-                                          variant="outline"
-                                          size="sm"
-                                          onClick={() => handleMarkAsComplete(idx)}
-                                          disabled={isUpdating}
-                                          className="text-green-600 hover:text-green-700 border-green-300 hover:bg-green-50"
-                                        >
-                                          Mark as Complete
-                                        </Button>
-                                      ) : (
-                                        <span className="text-sm text-green-600 font-medium">Complete</span>
-                                      )}
-                                    </TableCell>
+                                    {schedule.status !== 'incoming' && (
+                                      <TableCell className={`align-top ${isComplete ? 'bg-green-50' : ''}`}>
+                                        {!isComplete ? (
+                                          <Button
+                                            type="button"
+                                            variant="outline"
+                                            size="sm"
+                                            onClick={() => handleMarkAsComplete(idx)}
+                                            disabled={isUpdating}
+                                            className="text-green-600 hover:text-green-700 border-green-300 hover:bg-green-50"
+                                          >
+                                            Mark as Complete
+                                          </Button>
+                                        ) : (
+                                          <span className="text-sm text-green-600 font-medium">Complete</span>
+                                        )}
+                                      </TableCell>
+                                    )}
                                   </TableRow>
                                 )
                               })}

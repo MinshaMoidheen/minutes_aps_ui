@@ -960,7 +960,7 @@ export function IncomingScheduleList({ onEdit, status = 'incoming' }: IncomingSc
                           )}
                         </div>
                         
-                        {!isComplete && (
+                        {!isComplete && selectedScheduleForPoints?.status !== 'incoming' && (
                           <Button
                             variant="ghost"
                             size="sm"

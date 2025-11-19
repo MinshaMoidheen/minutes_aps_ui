@@ -14,7 +14,7 @@ import { ScheduleDetailPanel } from '../components/schedule-detail-panel'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Button } from '@/components/ui/button'
 import { toast } from '@/hooks/use-toast'
-import { PanelRightOpen } from 'lucide-react'
+import { CheckCircle2, PanelRightOpen } from 'lucide-react'
 
 export default function ScheduleDetailPage() {
   const params = useParams()
@@ -139,13 +139,13 @@ export default function ScheduleDetailPage() {
                                         {!isComplete ? (
                                           <Button
                                             type="button"
-                                            variant="outline"
+                                            variant="ghost"
                                             size="sm"
                                             onClick={() => handleMarkAsComplete(idx)}
                                             disabled={isUpdating}
-                                            className="text-green-600 hover:text-green-700 border-green-300 hover:bg-green-50"
+                                            className="h-8 w-8 p-0 text-green-600 hover:text-green-700"
                                           >
-                                            Mark as Complete
+                                           <CheckCircle2 className="h-5 w-5" />
                                           </Button>
                                         ) : (
                                           <span className="text-sm text-green-600 font-medium">Complete</span>

@@ -29,6 +29,7 @@ import { useGetCommonClientsQuery } from '@/store/api/clientApi'
 import { useGetClientAttendeesQuery } from '@/store/api/clientAttendeesApi'
 import { useGetMeetingTypesQuery } from '@/store/api/meetingTypeApi'
 import { useCreateScheduleMutation, useUpdateScheduleMutation, useGetScheduleByIdQuery } from '@/store/api/scheduleApi'
+import employeesJson from '@/data/employees.json'
 import { Eye, EyeOff } from 'lucide-react'
 import {
   AlertDialog,
@@ -257,13 +258,25 @@ export function IncomingScheduleForm({ mode, schedule, onSuccess, onCancel, onVi
         ? (scheduleToUse as any).meetingTypeId?._id 
         : (scheduleToUse as any).meetingTypeId
         
-      // Extract clientId - it might be an object if populated, a string, or in a client field
+      // Extract clientId - it might be an email (saved), an object if populated, a string _id, or in a client field
       let clientId: string | undefined = undefined
       if ((scheduleToUse as any).clientId) {
         if (typeof (scheduleToUse as any).clientId === 'object' && (scheduleToUse as any).clientId !== null) {
+          // If it's a populated object, get the _id
           clientId = (scheduleToUse as any).clientId?._id
         } else if (typeof (scheduleToUse as any).clientId === 'string') {
-          clientId = (scheduleToUse as any).clientId
+          // Check if it's an email (saved as email) or an _id
+          if ((scheduleToUse as any).clientId.includes('@')) {
+            // It's an email, find the client by email to get _id for form
+            const clientByEmail = clients.find((c: any) => c.email === (scheduleToUse as any).clientId)
+            if (clientByEmail && clientByEmail._id) {
+              clientId = clientByEmail._id
+              console.log('Found client by email - email:', (scheduleToUse as any).clientId, '_id:', clientId)
+            }
+          } else {
+            // It's an _id, use it directly
+            clientId = (scheduleToUse as any).clientId
+          }
         }
       }
       // Also check if client is populated separately
@@ -271,15 +284,39 @@ export function IncomingScheduleForm({ mode, schedule, onSuccess, onCancel, onVi
         clientId = (scheduleToUse as any).client?._id
       }
 
-      // Extract attendeeIds - handle both populated and non-populated cases
+      // Extract attendeeIds - handle emails (saved), populated objects, or _id strings
       let attendeeIdsFromSchedule: string[] = []
+      const employeesList = (employeesJson as any)?.employees || []
       
-      // Check attendeeIds field (might be array of strings or array of objects)
+      // Check attendeeIds field (might be array of emails, strings (_ids), or objects)
       if (Array.isArray((scheduleToUse as any).attendeeIds)) {
         attendeeIdsFromSchedule = (scheduleToUse as any).attendeeIds
           .map((v: any) => {
-            if (typeof v === 'string') return v
-            if (typeof v === 'object' && v !== null && v._id) return v._id
+            if (typeof v === 'string') {
+              // Check if it's an email (saved as email) or an _id
+              if (v.includes('@')) {
+                // It's an email, find the attendee by email to get _id for form
+                // First try in filteredAttendees (from API)
+                const attendeeByEmail = filteredAttendees.find((a: any) => a.email === v)
+                if (attendeeByEmail && attendeeByEmail._id) {
+                  console.log('Found attendee by email - email:', v, '_id:', attendeeByEmail._id)
+                  return attendeeByEmail._id
+                }
+                // Try in employees JSON
+                const employeeByEmail = employeesList.find((emp: any) => emp.email === v)
+                if (employeeByEmail && employeeByEmail._id) {
+                  console.log('Found employee by email - email:', v, '_id:', employeeByEmail._id)
+                  return employeeByEmail._id
+                }
+                return null
+              } else {
+                // It's an _id, use it directly
+                return v
+              }
+            }
+            if (typeof v === 'object' && v !== null && v._id) {
+              return v._id
+            }
             return null
           })
           .filter((v: any): v is string => typeof v === 'string' && v.trim() !== '')
@@ -289,8 +326,25 @@ export function IncomingScheduleForm({ mode, schedule, onSuccess, onCancel, onVi
       if (attendeeIdsFromSchedule.length === 0 && Array.isArray((scheduleToUse as any).attendees)) {
         attendeeIdsFromSchedule = (scheduleToUse as any).attendees
           .map((a: any) => {
-            if (typeof a === 'string') return a
-            if (typeof a === 'object' && a !== null && a._id) return a._id
+            if (typeof a === 'string') {
+              // Check if it's an email or _id
+              if (a.includes('@')) {
+                const attendeeByEmail = filteredAttendees.find((att: any) => att.email === a)
+                if (attendeeByEmail && attendeeByEmail._id) {
+                  return attendeeByEmail._id
+                }
+                const employeeByEmail = employeesList.find((emp: any) => emp.email === a)
+                if (employeeByEmail && employeeByEmail._id) {
+                  return employeeByEmail._id
+                }
+                return null
+              } else {
+                return a
+              }
+            }
+            if (typeof a === 'object' && a !== null && a._id) {
+              return a._id
+            }
             return null
           })
           .filter((v: any): v is string => typeof v === 'string' && v.trim() !== '')
@@ -356,6 +410,77 @@ export function IncomingScheduleForm({ mode, schedule, onSuccess, onCancel, onVi
           : mp.accountability
       }))
 
+      // Convert clientId from _id to email for saving
+      let clientEmailToSend: string | undefined = undefined
+      if (data.clientId && typeof data.clientId === 'string') {
+        // If it's already an email, use it directly
+        if (data.clientId.includes('@')) {
+          clientEmailToSend = data.clientId
+        } else {
+          // Find client by _id and get email
+          const client = clients.find((c: any) => 
+            c._id === data.clientId || c._id?.toString() === data.clientId?.toString()
+          )
+          if (client && client.email) {
+            clientEmailToSend = client.email
+            console.log('Client found - _id:', data.clientId, 'email:', client.email)
+          } else {
+            toast({
+              title: 'Invalid Client Selection',
+              description: 'Could not find client email. Please select a client from the dropdown.',
+              variant: 'destructive',
+            })
+            return
+          }
+        }
+      }
+
+      // Convert attendeeIds from _id array to email array for saving
+      const attendeeEmailsToSend: string[] = []
+      if (data.attendeeIds && Array.isArray(data.attendeeIds) && data.attendeeIds.length > 0) {
+        const employeesList = (employeesJson as any)?.employees || []
+        
+        console.log('Converting attendeeIds to emails:', data.attendeeIds)
+        console.log('Available filteredAttendees:', filteredAttendees.length)
+        console.log('Available employees:', employeesList.length)
+        
+        data.attendeeIds.forEach((attendeeId: string) => {
+          // If it's already an email, use it directly
+          if (attendeeId.includes('@')) {
+            if (!attendeeEmailsToSend.includes(attendeeId)) {
+              attendeeEmailsToSend.push(attendeeId)
+            }
+          } else {
+            // Find attendee by _id and get email
+            // First try in filteredAttendees (from API)
+            const attendee = filteredAttendees.find((a: any) => 
+              a._id === attendeeId || a._id?.toString() === attendeeId?.toString()
+            )
+            if (attendee && attendee.email) {
+              if (!attendeeEmailsToSend.includes(attendee.email)) {
+                attendeeEmailsToSend.push(attendee.email)
+                console.log('Attendee found in API - _id:', attendeeId, 'email:', attendee.email)
+              }
+            } else {
+              // Try in employees JSON
+              const employee = employeesList.find((emp: any) => 
+                emp._id === attendeeId || emp._id?.toString() === attendeeId?.toString()
+              )
+              if (employee && employee.email) {
+                if (!attendeeEmailsToSend.includes(employee.email)) {
+                  attendeeEmailsToSend.push(employee.email)
+                  console.log('Employee found in JSON - _id:', attendeeId, 'email:', employee.email)
+                }
+              } else {
+                console.warn('Could not find attendee/employee with _id:', attendeeId)
+              }
+            }
+          }
+        })
+        
+        console.log('Converted attendee emails:', attendeeEmailsToSend)
+      }
+
       const scheduleData = {
         title: data.title,
         meetingTypeId: data.meetingTypeId || undefined,
@@ -364,8 +489,8 @@ export function IncomingScheduleForm({ mode, schedule, onSuccess, onCancel, onVi
         startTime: data.startTime,
         endTime: data.endTime,
         location: data.location,
-        clientId: data.clientId,
-        attendeeIds: data.attendeeIds || [],
+        clientId: clientEmailToSend || undefined, // Save email instead of _id
+        attendeeIds: attendeeEmailsToSend, // Save emails instead of _ids
         agenda: data.agenda || '',
         meetingPoints: processedMeetingPoints,
         closureReport: data.closureReport,
@@ -374,6 +499,8 @@ export function IncomingScheduleForm({ mode, schedule, onSuccess, onCancel, onVi
       }
       
       console.log('Sending schedule data:', scheduleData)
+      console.log('Client email:', clientEmailToSend)
+      console.log('Attendee emails:', attendeeEmailsToSend)
       
       if (mode === 'edit' && schedule?._id) {
         await updateSchedule({ scheduleId: schedule._id, data: scheduleData }).unwrap()
@@ -731,25 +858,38 @@ export function IncomingScheduleForm({ mode, schedule, onSuccess, onCancel, onVi
                             )}
                           </CommandEmpty>
                           <CommandGroup>
-                            {filteredClients.map((client: any) => (
-                              <CommandItem
-                                key={client._id}
-                                value={`${client.username} ${client.email} ${client.companyName || ''} ${client.companyCode || ''}`}
-                                onSelect={() => {
-                                  field.onChange(client._id)
-                                  setClientOpen(false)
-                                  setClientSearchValue('')
-                                }}
-                              >
-                                <Check
-                                  className={cn(
-                                    "mr-2 h-4 w-4",
-                                    field.value === client._id ? "opacity-100" : "opacity-0"
-                                  )}
-                                />
-                                {client.username} ({client.email})
-                              </CommandItem>
-                            ))}
+                            {filteredClients.map((client: any) => {
+                              const clientId = client._id || client.id
+                              if (!clientId) {
+                                console.warn('Client missing _id:', client)
+                                return null
+                              }
+                              return (
+                                <CommandItem
+                                  key={clientId}
+                                  value={`${client.username} ${client.email} ${client.companyName || ''} ${client.companyCode || ''}`}
+                                  onSelect={(selectedValue) => {
+                                    // Explicitly use client._id, not the selectedValue parameter
+                                    const idToSet = client._id || client.id
+                                    if (idToSet) {
+                                      field.onChange(idToSet)
+                                      setClientOpen(false)
+                                      setClientSearchValue('')
+                                    } else {
+                                      console.error('Cannot set clientId: client._id is missing', client)
+                                    }
+                                  }}
+                                >
+                                  <Check
+                                    className={cn(
+                                      "mr-2 h-4 w-4",
+                                      field.value === clientId ? "opacity-100" : "opacity-0"
+                                    )}
+                                  />
+                                  {client.username} ({client.email})
+                                </CommandItem>
+                              )
+                            })}
                             {canCreateClient && clientSearchValue.trim() && filteredClients.length > 0 && (
                               <CommandItem
                                 onSelect={handleCreateClient}

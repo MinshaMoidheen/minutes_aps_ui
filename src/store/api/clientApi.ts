@@ -74,7 +74,11 @@ export const clientApi = baseApi.injectEndpoints({
             .map((client: any) => ({
               _id: client._id,
               username: client.companyName || '',
-              email: client.emailIds && client.emailIds.length > 0 ? client.emailIds[0] : `${client.companyCode}@company.com`,
+              email: client.emailIds 
+                ? (Array.isArray(client.emailIds) 
+                    ? (client.emailIds.length > 0 ? client.emailIds[0] : `${client.companyCode}@company.com`)
+                    : client.emailIds) // If it's a string, use it directly
+                : `${client.companyCode}@company.com`,
               companyName: client.companyName,
               companyCode: client.companyCode,
               companyId: client.companyId,

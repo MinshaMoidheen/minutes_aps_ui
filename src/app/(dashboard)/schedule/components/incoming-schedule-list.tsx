@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import {
@@ -28,6 +28,7 @@ import { useRouter } from 'next/navigation'
 import { useGetSchedulesQuery, useDeleteScheduleMutation, useUpdateScheduleMutation } from '@/store/api/scheduleApi'
 import { useGetClientAttendeesQuery } from '@/store/api/clientAttendeesApi'
 import { useGetCommonClientsQuery } from '@/store/api/clientApi'
+import { BASE_URL, CLIENT_URL } from '@/constants'
 import employeesJson from '@/data/employees.json'
 import { ScheduleDetailModal } from './schedule-detail-modal'
 import {
@@ -88,14 +89,135 @@ export function IncomingScheduleList({ onEdit, status = 'incoming' }: IncomingSc
   const { data: attendeesData } = useGetClientAttendeesQuery({ limit: 1000, offset: 0 })
   const { data: clientsData } = useGetCommonClientsQuery({ limit: 1000, offset: 0 })
 
-  // Get clients and attendees data for email lookup
-  const clients = useMemo(() => {
-    return (clientsData as any)?.data?.clients || clientsData?.clients || []
+  // State for merged clients and employees from both APIs
+  const [allClients, setAllClients] = useState<any[]>([])
+  const [allEmployees, setAllEmployees] = useState<any[]>([])
+
+  // Fetch clients from both external and internal APIs
+  useEffect(() => {
+    const fetchAllClients = async () => {
+      const mergedClients: any[] = []
+      
+      // Get clients from RTK Query (which includes external API)
+      const rtkClients = (clientsData as any)?.data?.clients || clientsData?.clients || []
+      mergedClients.push(...rtkClients.map((c: any) => ({ ...c, source: 'rtk' })))
+      
+      // Fetch from internal API
+      try {
+        const token = typeof window !== 'undefined' ? localStorage.getItem('accessToken') : null
+        const internalResponse = await fetch(`${BASE_URL}${CLIENT_URL}?limit=1000&offset=0`, {
+          method: 'GET',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { 'authorization': `Bearer ${token}` } : {}),
+          },
+          credentials: 'include',
+        })
+        
+        if (internalResponse.ok) {
+          const internalData = await internalResponse.json()
+          const internalClients = internalData?.data?.clients || internalData?.clients || []
+          mergedClients.push(...internalClients.map((c: any) => ({ ...c, source: 'internal' })))
+        }
+      } catch (internalError) {
+        console.warn('Failed to fetch clients from internal API:', internalError)
+      }
+      
+      // Fetch from external API
+      try {
+        const externalResponse = await fetch('/api/external/clients?page=1&limit=1000')
+        const externalResult = await externalResponse.json()
+        
+        if (externalResult.success && externalResult.data) {
+          const externalClientsList = externalResult.data.clients || externalResult.data.data?.clients || externalResult.data || []
+          const mappedExternalClients = externalClientsList.map((client: any) => ({
+            _id: client._id || client.id,
+            username: client.username || client.name || client.clientName || client.companyName || '',
+            email: client.email || '',
+            companyName: client.companyName || client.company || '',
+            companyCode: client.companyCode || '',
+            source: 'external',
+            ...client
+          }))
+          mergedClients.push(...mappedExternalClients)
+        }
+      } catch (externalError) {
+        console.warn('Failed to fetch clients from external API:', externalError)
+      }
+      
+      // Remove duplicates based on _id, preferring external > internal > rtk
+      const uniqueClients = mergedClients.filter((client, index, self) => {
+        const clientId = client._id || client.id
+        const firstIndex = self.findIndex((c: any) => 
+          (c._id || c.id) === clientId
+        )
+        return index === firstIndex
+      })
+      
+      setAllClients(uniqueClients)
+    }
+    
+    fetchAllClients()
   }, [clientsData])
+
+  // Fetch employees from external API
+  useEffect(() => {
+    const fetchAllEmployees = async () => {
+      const mergedEmployees: any[] = []
+      
+      // Get employees from RTK Query
+      const rtkAttendees = (attendeesData as any)?.data?.attendees || []
+      mergedEmployees.push(...rtkAttendees.map((a: any) => ({ ...a, source: 'rtk' })))
+      
+      // Get employees from JSON
+      const jsonEmployees = (employeesJson as any).employees || []
+      mergedEmployees.push(...jsonEmployees.map((e: any) => ({ ...e, source: 'json' })))
+      
+      // Fetch from external API
+      try {
+        const externalResponse = await fetch('/api/external/employees?page=1&limit=1000')
+        const externalResult = await externalResponse.json()
+        
+        if (externalResult.success && externalResult.data) {
+          const employeesList = externalResult.data.employees || externalResult.data.data?.employees || externalResult.data || []
+          const mappedEmployees = employeesList.map((emp: any) => ({
+            _id: emp._id || emp.id,
+            username: emp.username || emp.empName || emp.name,
+            email: emp.email,
+            empCode: emp.empCode || emp.employeeCode,
+            activeStatus: emp.activeStatus !== false,
+            source: 'external',
+            ...emp
+          }))
+          mergedEmployees.push(...mappedEmployees)
+        }
+      } catch (externalError) {
+        console.warn('Failed to fetch employees from external API:', externalError)
+      }
+      
+      // Remove duplicates based on _id
+      const uniqueEmployees = mergedEmployees.filter((emp, index, self) => {
+        const empId = emp._id || emp.id
+        const firstIndex = self.findIndex((e: any) => 
+          (e._id || e.id) === empId
+        )
+        return index === firstIndex
+      })
+      
+      setAllEmployees(uniqueEmployees)
+    }
+    
+    fetchAllEmployees()
+  }, [attendeesData])
+
+  // Get clients and attendees data for email lookup (merged from all sources)
+  const clients = useMemo(() => {
+    return allClients
+  }, [allClients])
   
   const attendees = useMemo(() => {
-    return (attendeesData as any)?.data?.attendees || []
-  }, [attendeesData])
+    return allEmployees
+  }, [allEmployees])
 
   console.log("schedules",data)
 
@@ -174,9 +296,10 @@ export function IncomingScheduleList({ onEdit, status = 'incoming' }: IncomingSc
       console.log("handleSendEmail - clients available:", clients.length)
       console.log("handleSendEmail - attendees available:", attendees.length)
       
-      // Get employees from JSON file
+      // Get employees from JSON file (as additional fallback)
       const employees = (employeesJson as any).employees || []
       console.log("handleSendEmail - employees available:", employees.length)
+      console.log("handleSendEmail - allEmployees available:", allEmployees.length)
       
       // Get client email
       if (schedule.clientId) {
@@ -254,23 +377,32 @@ export function IncomingScheduleList({ onEdit, status = 'incoming' }: IncomingSc
             console.log(`Looking up attendee by _id:`, id)
             
             if (id) {
-              // First try API data (client attendees)
+              // First try merged attendees/employees (includes RTK, JSON, and external API)
               const attendee = attendees.find((att: any) => 
                 att._id === id || att._id?.toString() === id?.toString()
               )
               if (attendee && attendee.email) {
                 attendeeEmail = attendee.email
-                console.log(`Found attendee email from API:`, attendeeEmail)
+                console.log(`Found attendee email from merged data:`, attendeeEmail)
               } else {
-                // Try JSON file (employees)
-                const employee = employees.find((emp: any) => 
+                // Try allEmployees as additional fallback
+                const employee = allEmployees.find((emp: any) => 
                   emp._id === id || emp._id?.toString() === id?.toString()
                 )
                 if (employee && employee.email) {
                   attendeeEmail = employee.email
-                  console.log(`Found employee email from JSON:`, attendeeEmail)
+                  console.log(`Found employee email from allEmployees:`, attendeeEmail)
                 } else {
-                  console.warn(`Could not find attendee/employee with _id:`, id)
+                  // Try JSON file as last fallback
+                  const jsonEmployee = employees.find((emp: any) => 
+                    emp._id === id || emp._id?.toString() === id?.toString()
+                  )
+                  if (jsonEmployee && jsonEmployee.email) {
+                    attendeeEmail = jsonEmployee.email
+                    console.log(`Found employee email from JSON:`, attendeeEmail)
+                  } else {
+                    console.warn(`Could not find attendee/employee with _id:`, id)
+                  }
                 }
               }
             }

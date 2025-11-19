@@ -25,11 +25,10 @@ import {
 import { Checkbox } from '@/components/ui/checkbox'
 import { toast } from '@/hooks/use-toast'
 import { Schedule } from '../page'
-import { useGetCommonClientsQuery } from '@/store/api/clientApi'
-import { useGetClientAttendeesQuery } from '@/store/api/clientAttendeesApi'
+import { BASE_URL, CLIENT_URL } from '@/constants'
+// Removed RTK Query hooks - using external API instead
 import { useGetMeetingTypesQuery } from '@/store/api/meetingTypeApi'
 import { useCreateScheduleMutation, useUpdateScheduleMutation, useGetScheduleByIdQuery } from '@/store/api/scheduleApi'
-import employeesJson from '@/data/employees.json'
 import { Eye, EyeOff } from 'lucide-react'
 import {
   AlertDialog,
@@ -168,17 +167,157 @@ export function IncomingScheduleForm({ mode, schedule, onSuccess, onCancel, onVi
     },
   })
 
-  const { data: clientsData } = useGetCommonClientsQuery({ limit: 100, offset: 0 })
+  const [clients, setClients] = useState<any[]>([])
+  const [isLoadingClients, setIsLoadingClients] = useState(false)
   const [createClient, { isLoading: isCreatingClient }] = useCreateClientMutation()
   const [clientOpen, setClientOpen] = useState(false)
   const [clientSearchValue, setClientSearchValue] = useState('')
   
   const selectedClientId = form.watch('clientId')
-  const { data: attendeesResp } = useGetClientAttendeesQuery({ 
-    limit: 100, 
-    offset: 0
-    // Removed clientId filter to show all attendees regardless of client selection
-  })
+  
+  // Employees/Attendees state
+  const [employees, setEmployees] = useState<any[]>([])
+  const [isLoadingEmployees, setIsLoadingEmployees] = useState(false)
+
+  // Fetch clients from both external API and internal API
+  useEffect(() => {
+    const fetchClients = async () => {
+      setIsLoadingClients(true)
+      try {
+        const allClients: any[] = []
+        
+        // Fetch from external API
+        try {
+          const externalResponse = await fetch('/api/external/clients?page=1&limit=1000')
+          const externalResult = await externalResponse.json()
+          
+          if (externalResult.success && externalResult.data) {
+            const externalClientsList = externalResult.data.clients || externalResult.data.data?.clients || externalResult.data || []
+            const mappedExternalClients = externalClientsList.map((client: any) => ({
+              _id: client._id || client.id,
+              username: client.username || client.name || client.clientName || client.companyName || '',
+              email: client.email || '',
+              companyName: client.companyName || client.company || '',
+              companyCode: client.companyCode || '',
+              source: 'external',
+              ...client
+            }))
+            allClients.push(...mappedExternalClients)
+          }
+        } catch (externalError) {
+          console.warn('Failed to fetch clients from external API:', externalError)
+        }
+        
+        // Fetch from internal API
+        try {
+          const token = typeof window !== 'undefined' ? localStorage.getItem('accessToken') : null
+          const internalResponse = await fetch(`${BASE_URL}${CLIENT_URL}?limit=1000&offset=0`, {
+            method: 'GET',
+            headers: {
+              'Content-Type': 'application/json',
+              ...(token ? { 'authorization': `Bearer ${token}` } : {}),
+            },
+            credentials: 'include',
+          })
+          
+          if (internalResponse.ok) {
+            const internalData = await internalResponse.json()
+            const internalClientsList = internalData?.data?.clients || internalData?.clients || []
+            const mappedInternalClients = internalClientsList.map((client: any) => ({
+              _id: client._id || client.id,
+              username: client.username || client.name || client.clientName,
+              email: client.email,
+              companyName: client.companyName || client.company,
+              companyCode: client.companyCode,
+              source: 'internal',
+              ...client
+            }))
+            allClients.push(...mappedInternalClients)
+          }
+        } catch (internalError) {
+          console.warn('Failed to fetch clients from internal API:', internalError)
+        }
+        
+        // Remove duplicates based on _id or email, preferring external source
+        const uniqueClients = allClients.filter((client, index, self) => {
+          const clientId = client._id || client.id
+          const clientEmail = client.email
+          
+          // Find first occurrence of this client (by _id or email)
+          const firstIndex = self.findIndex((c: any) => 
+            (c._id || c.id) === clientId || 
+            (clientEmail && c.email === clientEmail)
+          )
+          
+          // Keep only the first occurrence (external clients come first)
+          return index === firstIndex
+        })
+        
+        setClients(uniqueClients)
+        
+        if (uniqueClients.length === 0) {
+          toast({
+            title: 'Warning',
+            description: 'No clients found from any source.',
+            variant: 'destructive',
+          })
+        }
+      } catch (error: any) {
+        console.error('Error fetching clients:', error)
+        toast({
+          title: 'Error',
+          description: 'Failed to fetch clients. Please try again.',
+          variant: 'destructive',
+        })
+      } finally {
+        setIsLoadingClients(false)
+      }
+    }
+    
+    fetchClients()
+  }, [])
+
+  // Fetch employees from external API
+  useEffect(() => {
+    const fetchEmployees = async () => {
+      setIsLoadingEmployees(true)
+      try {
+        const response = await fetch('/api/external/employees?page=1&limit=1000')
+        const result = await response.json()
+        
+        if (result.success && result.data) {
+          // Map external API response to expected format
+          const employeesList = result.data.employees || result.data.data?.employees || result.data || []
+          setEmployees(employeesList.map((emp: any) => ({
+            _id: emp._id || emp.id,
+            username: emp.username || emp.empName || emp.name,
+            email: emp.email,
+            empCode: emp.empCode || emp.employeeCode,
+            activeStatus: emp.activeStatus !== false,
+            ...emp
+          })))
+        } else {
+          console.error('Failed to fetch employees:', result.message)
+          toast({
+            title: 'Error',
+            description: result.message || 'Failed to fetch employees',
+            variant: 'destructive',
+          })
+        }
+      } catch (error: any) {
+        console.error('Error fetching employees:', error)
+        toast({
+          title: 'Error',
+          description: 'Failed to fetch employees. Please try again.',
+          variant: 'destructive',
+        })
+      } finally {
+        setIsLoadingEmployees(false)
+      }
+    }
+    
+    fetchEmployees()
+  }, [])
 
   // Fetch schedule by ID if editing and schedule ID is available (to get populated fields)
   const { data: scheduleByIdData } = useGetScheduleByIdQuery(
@@ -238,7 +377,7 @@ export function IncomingScheduleForm({ mode, schedule, onSuccess, onCancel, onVi
   useEffect(() => {
     // Wait for data to load before populating form
     // Use scheduleToUse which may be fetched with populated fields
-    if (mode === 'edit' && scheduleToUse && clientsData !== undefined && attendeesResp !== undefined) {
+    if (mode === 'edit' && scheduleToUse && clients.length > 0 && employees.length > 0) {
       // Format dates from ISO string to YYYY-MM-DD format for date inputs
       const formatDateForInput = (dateString: string) => {
         if (!dateString) return ''
@@ -286,7 +425,6 @@ export function IncomingScheduleForm({ mode, schedule, onSuccess, onCancel, onVi
 
       // Extract attendeeIds - handle emails (saved), populated objects, or _id strings
       let attendeeIdsFromSchedule: string[] = []
-      const employeesList = (employeesJson as any)?.employees || []
       
       // Check attendeeIds field (might be array of emails, strings (_ids), or objects)
       if (Array.isArray((scheduleToUse as any).attendeeIds)) {
@@ -296,14 +434,14 @@ export function IncomingScheduleForm({ mode, schedule, onSuccess, onCancel, onVi
               // Check if it's an email (saved as email) or an _id
               if (v.includes('@')) {
                 // It's an email, find the attendee by email to get _id for form
-                // First try in filteredAttendees (from API)
+                // First try in filteredAttendees (from external API)
                 const attendeeByEmail = filteredAttendees.find((a: any) => a.email === v)
                 if (attendeeByEmail && attendeeByEmail._id) {
                   console.log('Found attendee by email - email:', v, '_id:', attendeeByEmail._id)
                   return attendeeByEmail._id
                 }
-                // Try in employees JSON
-                const employeeByEmail = employeesList.find((emp: any) => emp.email === v)
+                // Try in employees state (from external API)
+                const employeeByEmail = employees.find((emp: any) => emp.email === v)
                 if (employeeByEmail && employeeByEmail._id) {
                   console.log('Found employee by email - email:', v, '_id:', employeeByEmail._id)
                   return employeeByEmail._id
@@ -333,7 +471,7 @@ export function IncomingScheduleForm({ mode, schedule, onSuccess, onCancel, onVi
                 if (attendeeByEmail && attendeeByEmail._id) {
                   return attendeeByEmail._id
                 }
-                const employeeByEmail = employeesList.find((emp: any) => emp.email === a)
+                const employeeByEmail = employees.find((emp: any) => emp.email === a)
                 if (employeeByEmail && employeeByEmail._id) {
                   return employeeByEmail._id
                 }
@@ -390,7 +528,7 @@ export function IncomingScheduleForm({ mode, schedule, onSuccess, onCancel, onVi
       
       form.reset(formData)
     }
-  }, [mode, schedule, scheduleByIdData, clientsData, attendeesResp, form])
+  }, [mode, schedule, scheduleByIdData, clients, employees, form])
 
   const { data: meetingTypesData } = useGetMeetingTypesQuery({ limit: 100, offset: 0 })
   const [createSchedule, { isLoading: isCreating }] = useCreateScheduleMutation()
@@ -410,75 +548,64 @@ export function IncomingScheduleForm({ mode, schedule, onSuccess, onCancel, onVi
           : mp.accountability
       }))
 
-      // Convert clientId from _id to email for saving
-      let clientEmailToSend: string | undefined = undefined
+      // Save _id directly (backend expects ObjectId, not email)
+      let clientIdToSend: string | undefined = undefined
       if (data.clientId && typeof data.clientId === 'string') {
-        // If it's already an email, use it directly
+        // If it's an email (from old data), try to find the _id
         if (data.clientId.includes('@')) {
-          clientEmailToSend = data.clientId
-        } else {
-          // Find client by _id and get email
-          const client = clients.find((c: any) => 
-            c._id === data.clientId || c._id?.toString() === data.clientId?.toString()
-          )
-          if (client && client.email) {
-            clientEmailToSend = client.email
-            console.log('Client found - _id:', data.clientId, 'email:', client.email)
+          const client = clients.find((c: any) => c.email === data.clientId)
+          if (client && client._id) {
+            clientIdToSend = client._id
+            console.log('Found client _id by email - email:', data.clientId, '_id:', client._id)
           } else {
-            toast({
-              title: 'Invalid Client Selection',
-              description: 'Could not find client email. Please select a client from the dropdown.',
-              variant: 'destructive',
-            })
-            return
+            // If client not found by email, use email as fallback (shouldn't happen normally)
+            clientIdToSend = data.clientId
+            console.warn('Client not found by email, using email as fallback:', data.clientId)
           }
+        } else {
+          // It's already an _id, use it directly
+          clientIdToSend = data.clientId
+          console.log('Using client _id directly:', data.clientId)
         }
       }
 
-      // Convert attendeeIds from _id array to email array for saving
-      const attendeeEmailsToSend: string[] = []
+      // Save _id array directly (backend expects ObjectId array, not email array)
+      const attendeeIdsToSend: string[] = []
       if (data.attendeeIds && Array.isArray(data.attendeeIds) && data.attendeeIds.length > 0) {
-        const employeesList = (employeesJson as any)?.employees || []
-        
-        console.log('Converting attendeeIds to emails:', data.attendeeIds)
-        console.log('Available filteredAttendees:', filteredAttendees.length)
-        console.log('Available employees:', employeesList.length)
+        console.log('Processing attendeeIds:', data.attendeeIds)
         
         data.attendeeIds.forEach((attendeeId: string) => {
-          // If it's already an email, use it directly
+          // If it's an email (from old data), try to find the _id
           if (attendeeId.includes('@')) {
-            if (!attendeeEmailsToSend.includes(attendeeId)) {
-              attendeeEmailsToSend.push(attendeeId)
-            }
-          } else {
-            // Find attendee by _id and get email
-            // First try in filteredAttendees (from API)
-            const attendee = filteredAttendees.find((a: any) => 
-              a._id === attendeeId || a._id?.toString() === attendeeId?.toString()
-            )
-            if (attendee && attendee.email) {
-              if (!attendeeEmailsToSend.includes(attendee.email)) {
-                attendeeEmailsToSend.push(attendee.email)
-                console.log('Attendee found in API - _id:', attendeeId, 'email:', attendee.email)
+            // Try to find attendee by email
+            const attendee = filteredAttendees.find((a: any) => a.email === attendeeId)
+            if (attendee && attendee._id) {
+              if (!attendeeIdsToSend.includes(attendee._id)) {
+                attendeeIdsToSend.push(attendee._id)
+                console.log('Found attendee _id by email - email:', attendeeId, '_id:', attendee._id)
               }
             } else {
-              // Try in employees JSON
-              const employee = employeesList.find((emp: any) => 
-                emp._id === attendeeId || emp._id?.toString() === attendeeId?.toString()
-              )
-              if (employee && employee.email) {
-                if (!attendeeEmailsToSend.includes(employee.email)) {
-                  attendeeEmailsToSend.push(employee.email)
-                  console.log('Employee found in JSON - _id:', attendeeId, 'email:', employee.email)
+              // Try in employees
+              const employee = employees.find((emp: any) => emp.email === attendeeId)
+              if (employee && employee._id) {
+                if (!attendeeIdsToSend.includes(employee._id)) {
+                  attendeeIdsToSend.push(employee._id)
+                  console.log('Found employee _id by email - email:', attendeeId, '_id:', employee._id)
                 }
               } else {
-                console.warn('Could not find attendee/employee with _id:', attendeeId)
+                console.warn('Could not find attendee/employee by email:', attendeeId)
               }
+            }
+          } else {
+            // It's already an _id, use it directly
+            if (!attendeeIdsToSend.includes(attendeeId)) {
+              attendeeIdsToSend.push(attendeeId)
+              console.log('Using attendee _id directly:', attendeeId)
             }
           }
         })
         
-        console.log('Converted attendee emails:', attendeeEmailsToSend)
+        console.log('Final attendee _ids to send:', attendeeIdsToSend)
       }
 
       const scheduleData = {
@@ -489,8 +616,8 @@ export function IncomingScheduleForm({ mode, schedule, onSuccess, onCancel, onVi
         startTime: data.startTime,
         endTime: data.endTime,
         location: data.location,
-        clientId: clientEmailToSend || undefined, // Save email instead of _id
-        attendeeIds: attendeeEmailsToSend, // Save emails instead of _ids
+        clientId: clientIdToSend || undefined, // Save _id instead of email
+        attendeeIds: attendeeIdsToSend, // Save _id array instead of email array
         agenda: data.agenda || '',
         meetingPoints: processedMeetingPoints,
         closureReport: data.closureReport,
@@ -499,8 +626,8 @@ export function IncomingScheduleForm({ mode, schedule, onSuccess, onCancel, onVi
       }
       
       console.log('Sending schedule data:', scheduleData)
-      console.log('Client email:', clientEmailToSend)
-      console.log('Attendee emails:', attendeeEmailsToSend)
+      console.log('Client _id:', clientIdToSend)
+      console.log('Attendee _ids:', attendeeIdsToSend)
       
       if (mode === 'edit' && schedule?._id) {
         await updateSchedule({ scheduleId: schedule._id, data: scheduleData }).unwrap()
@@ -529,10 +656,11 @@ export function IncomingScheduleForm({ mode, schedule, onSuccess, onCancel, onVi
 
   const selectedAttendees = form.watch('attendeeIds') || []
 
-  // Filter attendees based on selected client (already filtered by API, but keep for safety)
+  // Filter attendees - use employees from external API
   const filteredAttendees = useMemo(() => {
-    return attendeesResp?.data?.attendees || []
-  }, [attendeesResp?.data?.attendees])
+    // Filter active employees only
+    return employees.filter((emp: any) => emp.activeStatus !== false)
+  }, [employees])
   
   // Filter attendees by search term for modal
   const filteredAttendeesForModal = useMemo(() => {
@@ -588,10 +716,7 @@ export function IncomingScheduleForm({ mode, schedule, onSuccess, onCancel, onVi
       .join(', ')
   }, [filteredAttendees, selectedAttendees])
 
-  // Get clients list
-  const clients = useMemo(() => {
-    return (clientsData as any)?.data?.clients || clientsData?.clients || []
-  }, [clientsData])
+  // Clients are already loaded in state, no need for useMemo
 
   // Filter clients by search
   const filteredClients = useMemo(() => {
@@ -821,10 +946,14 @@ export function IncomingScheduleForm({ mode, schedule, onSuccess, onCancel, onVi
                             "w-full justify-between",
                             !field.value && "text-muted-foreground"
                           )}
-                          disabled={isLoading || readOnly}
+                          disabled={isLoading || isLoadingClients || readOnly}
                         >
-                          {selectedClient
-                            ? `${selectedClient.username} (${selectedClient.email})`
+                          {isLoadingClients 
+                            ? "Loading clients..."
+                            : selectedClient
+                            ? selectedClient.companyName 
+                              ? `${selectedClient.companyName}${selectedClient.email ? ` (${selectedClient.email})` : ''}`
+                              : `${selectedClient.username || 'Client'}${selectedClient.email ? ` (${selectedClient.email})` : ''}`
                             : "Select a client"}
                           <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                         </Button>
@@ -886,7 +1015,9 @@ export function IncomingScheduleForm({ mode, schedule, onSuccess, onCancel, onVi
                                       field.value === clientId ? "opacity-100" : "opacity-0"
                                     )}
                                   />
-                                  {client.username} ({client.email})
+                                  {client.companyName 
+                                    ? `${client.companyName}${client.email ? ` (${client.email})` : client.companyCode ? ` (${client.companyCode})` : ''}`
+                                    : `${client.username || 'Client'}${client.email ? ` (${client.email})` : ''}`}
                                 </CommandItem>
                               )
                             })}
@@ -1009,7 +1140,13 @@ export function IncomingScheduleForm({ mode, schedule, onSuccess, onCancel, onVi
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {filteredAttendeesForModal.length === 0 ? (
+                      {isLoadingEmployees ? (
+                        <TableRow>
+                          <TableCell colSpan={4} className="text-center text-muted-foreground py-8">
+                            Loading employees...
+                          </TableCell>
+                        </TableRow>
+                      ) : filteredAttendeesForModal.length === 0 ? (
                         <TableRow>
                           <TableCell colSpan={4} className="text-center text-muted-foreground py-8">
                             No attendees found

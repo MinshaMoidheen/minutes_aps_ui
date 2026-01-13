@@ -110,25 +110,25 @@ export default function DashboardPage() {
       </Header>
 
       <Main fixed>
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-7 mb-6">
-          <Card className="col-span-1 lg:col-span-3">
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 mb-6">
+          <Card className="col-span-1">
             <CardHeader>
               <CardTitle>Calendar</CardTitle>
               <CardDescription>Select date to view meetings.</CardDescription>
             </CardHeader>
-            <CardContent>
+            <CardContent className="flex justify-center">
               <Calendar
                 mode="single"
                 selected={selectedDate}
                 onSelect={(d) => setSelectedDate(d ?? undefined)}
-                className="w-full"
+                className="w-full max-w-md"
                 modifiers={{ hasMeeting: meetingDates }}
                 modifiersClassNames={{ hasMeeting: 'bg-primary/15 text-foreground' }}
               />
             </CardContent>
           </Card>
 
-          <Card className="col-span-1 lg:col-span-4">
+          <Card className="col-span-1">
             <CardHeader>
               <CardTitle>
                 Meetings on {selectedDate ? selectedDate.toLocaleDateString() : '—'}
